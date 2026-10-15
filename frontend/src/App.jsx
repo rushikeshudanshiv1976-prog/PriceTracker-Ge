@@ -2,6 +2,7 @@ import ManualTrackForm from "./ManualTrackForm";
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
+import "/pricepulse-icon.png";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
