@@ -161,7 +161,11 @@ allowed_origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=[
+    "https://price-tracker-f14eib5xl-rushikeshudanshiv-5286.vercel.app",
+    "https://price-tracker-rho-opal.vercel.app",
+    "http://localhost:5173",
+],
     allow_credentials=True,
     allow_methods=[
         "GET",
