@@ -148,10 +148,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 allowed_origins = [
-    origin.strip()
+    origin.strip().rstrip("/")
     for origin in os.getenv(
         "FRONTEND_ORIGINS",
+        "https://price-tracker-rho-opal.vercel.app,"
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"
         "http://localhost:3000",
@@ -161,11 +163,12 @@ allowed_origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "https://price-tracker-f14eib5xl-rushikeshudanshiv-5286.vercel.app",
-    "https://price-tracker-rho-opal.vercel.app",
-    "http://localhost:5173",
-],
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
     allow_credentials=True,
     allow_methods=[
         "GET",
