@@ -572,23 +572,24 @@ export default function App() {
       <aside
         className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}
       >
-        <button
-          className="brand"
-          onClick={() => navigate("dashboard")}
-          type="button"
-        >
-          <img
-            src="/pricepulse-icon.png"
-             alt="PricePulse"
-             className="brand-icon"
-          />
-          <span className="brand-copy">
-  <span className="brand-name">
-    Price<span className="brand-accent">Pulse</span>
+<button
+  className="brand"
+  onClick={() => navigate("dashboard")}
+  type="button"
+  aria-label="PricePulse home"
+>
+  <img
+    className="brand-icon"
+    src="/pricepulse-icon.png"
+    alt=""
+  />
+  <span className="brand-copy">
+    <span className="brand-name">
+      Price<span className="brand-accent">Pulse</span>
+    </span>
+    <small>SHOP SMARTER.</small>
   </span>
-  <small>SHOP SMARTER.</small>
-</span>
-        </button>
+</button>
 
         <div className="sidebar-label">WORKSPACE</div>
 

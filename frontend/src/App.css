@@ -2930,3 +2930,100 @@ button:disabled {
   font-size: 0.78rem;
   line-height: 1.5;
 }
+
+
+/* ===== Sidebar logo alignment ===== */
+.sidebar .brand {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  margin: 0 0 32px;
+  padding: 0 8px;
+  overflow: visible;
+}
+
+.sidebar .brand .brand-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  flex: 0 0 36px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 22px;
+}
+
+.sidebar .brand .brand-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 4px;
+}
+
+.sidebar .brand .brand-name {
+  display: block;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.7px;
+  white-space: nowrap;
+}
+
+.sidebar .brand .brand-accent {
+  color: var(--brand-cyan);
+}
+
+.sidebar .brand small {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 2.5px;
+  white-space: nowrap;
+}
+
+/* ===== Prevent the sidebar promo card from being cut off ===== */
+.sidebar {
+  height: 100vh;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.sidebar-promo {
+  flex: 0 0 auto;
+  min-height: max-content;
+  margin: 20px 0;
+  overflow: visible;
+  padding: 18px 15px;
+}
+
+.sidebar-promo h3 {
+  line-height: 1.35;
+}
+
+.sidebar-promo p {
+  overflow-wrap: break-word;
+}
+
+.sidebar-promo button {
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  white-space: normal;
+}
+
+.sidebar-bottom {
+  flex: 0 0 auto;
+  margin-top: auto;
+}
