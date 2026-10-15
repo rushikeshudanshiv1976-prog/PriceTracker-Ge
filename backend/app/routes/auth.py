@@ -1,11 +1,18 @@
 import re
 from pydantic import BaseModel, Field, ConfigDict
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
-from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.security import (
+    burn_password_check,
+    create_access_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -27,7 +34,12 @@ def register_user(data: AuthSchema, db: Session = Depends(get_db)):
 
     user = User(email=email, hashed_password=hash_password(data.password))
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two simultaneous registrations passed the check above.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Email already registered")
     db.refresh(user)
     return {
         "message": "Registration successful",
@@ -41,6 +53,8 @@ def register_user(data: AuthSchema, db: Session = Depends(get_db)):
 def login_user(data: AuthSchema, db: Session = Depends(get_db)):
     email = data.email.lower()
     user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        burn_password_check(data.password)
     if user is None or not verify_password(data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

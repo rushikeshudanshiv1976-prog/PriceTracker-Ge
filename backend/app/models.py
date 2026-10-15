@@ -24,20 +24,26 @@ class Product(Base):
   url = Column(String, unique=True)
 
 
+
 class Subscription(Base):
   __tablename__ = "subscriptions"
+  __table_args__ = (
+    UniqueConstraint("user_email", "product_id", name="uq_subscription_user_product"),
+  )
   id = Column(Integer, primary_key=True, index=True)
   user_email = Column(String, index=True, nullable=False)
-  product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+  product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
   target_price = Column(Float, nullable=True)
+  alert_sent_at = Column(DateTime, nullable=True, default=None)
+
 
 
 class PriceHistory(Base):
   __tablename__ = "price_history"
   id = Column(Integer, primary_key=True, index=True)
-  product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+  product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
   price = Column(Float, nullable=False)
-  recorded_at = Column(DateTime, default=datetime.utcnow)
+  recorded_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class ProductOffer(Base):

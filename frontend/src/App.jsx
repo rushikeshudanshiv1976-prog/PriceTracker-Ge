@@ -1,4 +1,4 @@
-
+import ManualTrackForm from "./ManualTrackForm";
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
@@ -130,6 +130,70 @@ function getPriceLabel(product) {
     : "CATALOG LISTING";
 }
 
+const DISCOUNT_STATUS_COPY = {
+  insufficient_history: "NOT ENOUGH HISTORY",
+  unverified_claim: "CLAIM NOT VERIFIED",
+  suspicious_pre_sale_increase: "POSSIBLE PRE-SALE INCREASE",
+  consistent_with_history: "CONSISTENT WITH HISTORY",
+};
+
+function DiscountEvidence({ detector, currency = "INR" }) {
+  if (!detector?.has_claim) return null;
+
+  const history = detector.history || {};
+  const status = detector.status || "unverified_claim";
+  const label = DISCOUNT_STATUS_COPY[status] || "CLAIM NOT VERIFIED";
+  const severity = detector.severity || "neutral";
+  const hasHistory = Number(history.observation_count) > 0;
+
+  return (
+    <aside
+      className={`discount-evidence discount-evidence-${severity}`}
+      aria-label={`Discount check: ${label.toLowerCase()}`}
+    >
+      <div className="discount-evidence-heading">
+        <span className="discount-evidence-label">DISCOUNT CHECK</span>
+        <strong>{label}</strong>
+      </div>
+
+      <p>{detector.message}</p>
+
+      <div className="discount-evidence-stats">
+        <span>
+          <small>CLAIMED</small>
+          <strong>{detector.claimed_discount_percent}% off</strong>
+        </span>
+        <span>
+          <small>WAS</small>
+          <strong>{productMoney(detector.claimed_original_price, currency)}</strong>
+        </span>
+        <span>
+          <small>NOW</small>
+          <strong>{productMoney(detector.current_price, currency)}</strong>
+        </span>
+        {hasHistory && (
+          <span>
+            <small>HISTORY MEDIAN</small>
+            <strong>{productMoney(history.median_price, currency)}</strong>
+          </span>
+        )}
+        {hasHistory && (
+          <span>
+            <small>HISTORY LOW</small>
+            <strong>{productMoney(history.lowest_price, currency)}</strong>
+          </span>
+        )}
+      </div>
+
+      <span className="discount-evidence-source">
+        {hasHistory
+          ? `${history.observation_count} recorded checks across ${history.days_spanned} day${history.days_spanned === 1 ? "" : "s"}.`
+          : "No recorded checks for this exact retailer listing yet."}
+      </span>
+    </aside>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
 
@@ -193,8 +257,12 @@ export default function App() {
         setUser(emailAddress);
         localStorage.setItem("user_email", emailAddress);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
+
+        const status = err?.response?.status;
+        // A network hiccup or server error must not log the user out.
+        if (status !== 401 && status !== 403) return;
 
         setToken("");
         setUser("");
@@ -491,6 +559,7 @@ export default function App() {
     { id: "dashboard", icon: "⌂", label: "Dashboard" },
     { id: "search", icon: "⌕", label: "Search & Compare" },
     { id: "watchlist", icon: "♡", label: "Tracked Products" },
+    { id: "budget", icon: "▣", label: "Budget Basket" },
     { id: "profile", icon: "◉", label: "Profile & Settings" },
   ];
 
@@ -508,11 +577,17 @@ export default function App() {
           onClick={() => navigate("dashboard")}
           type="button"
         >
-          <span className="brand-icon">P</span>
-          <span>
-            price<span className="brand-accent">tracker</span>
-            <small>SHOP SMARTER.</small>
-          </span>
+          <img
+            src="/pricepulse-icon.png"
+             alt="PricePulse"
+             className="brand-icon"
+          />
+          <span className="brand-copy">
+  <span className="brand-name">
+    Price<span className="brand-accent">Pulse</span>
+  </span>
+  <small>SHOP SMARTER.</small>
+</span>
         </button>
 
         <div className="sidebar-label">WORKSPACE</div>
@@ -605,7 +680,7 @@ export default function App() {
             </button>
 
             <div>
-              <span className="breadcrumb">PRICE TRACKER /</span>
+              <span className="breadcrumb">PRICEPULSE /</span>
               <h1>{currentTitle}</h1>
             </div>
           </div>
@@ -680,7 +755,10 @@ export default function App() {
               results={searchResults}
               loading={searchLoading}
               searchMode={searchMode}
-              setSearchMode={setSearchMode}
+              setSearchMode={(mode) => {
+                setSearchMode(mode);
+                setSearchResults([]);
+              }}
               onTrack={trackProduct}
               trackingId={trackingId}
               onNavigate={navigate}
@@ -688,14 +766,28 @@ export default function App() {
           )}
 
           {page === "watchlist" && (
-            <WatchlistPage
-              items={watchlist}
-              loading={watchlistLoading}
-              onRemove={removeTrackedProduct}
-              onNavigate={navigate}
-              token={token}
-            />
-          )}
+  <>
+    <ManualTrackForm
+      token={token}
+      onSuccess={loadWatchlist}
+    />
+
+    <WatchlistPage
+      items={watchlist}
+      loading={watchlistLoading}
+      onRemove={removeTrackedProduct}
+      onNavigate={navigate}
+      token={token}
+      onNotify={setMessage}
+      onError={setError}
+    />
+  </>
+)}
+
+{page === "budget" && (
+  <BudgetBasket watchlist={watchlist} />
+)}
+
 
           {page === "profile" && (
             <ProfilePage
@@ -716,7 +808,7 @@ export default function App() {
           <footer className="app-footer">
             <span>MADE FOR SMARTER SHOPPING ✳</span>
             <span>
-              PriceTracker <span className="footer-dot">●</span>{" "}
+              PricePulse <span className="footer-dot">●</span>{" "}
               Compare before you buy.
             </span>
           </footer>
@@ -778,7 +870,7 @@ function Dashboard({ user, watchlist, onNavigate }) {
         </div>
       </section>
 
-      <section className="stats-grid">
+      <section className="stats-grid stats-grid-4">
         <StatCard
           icon="⌕"
           label="PRODUCT SEARCH"
@@ -1130,6 +1222,19 @@ if (Array.isArray(product.offers)) {
           })}
         </div>
 
+
+        {/* Evidence-based discount checks for individual retailer offers */}
+        {sortedOffers.map((offer, offerIndex) =>
+          offer.discount_warning?.has_claim ? (
+            <DiscountEvidence
+              key={`discount-${offer.url}-${offerIndex}`}
+              detector={offer.discount_warning}
+              currency="INR"
+            />
+          ) : null
+        )}
+
+
         {cheapest?.url && (
           <a
             className="btn-primary lowest-link"
@@ -1259,86 +1364,255 @@ if (Array.isArray(product.offers)) {
   );
 }
 
-function WatchlistPage({ items, loading, onRemove, onNavigate, token }) {
+
+function WatchlistPage({
+  items,
+  loading,
+  onRemove,
+  onNavigate,
+  token,
+  onNotify,
+  onError,
+}) {
+  // State for the existing price-history panel.
   const [historyFor, setHistoryFor] = useState(null);
   const [historyData, setHistoryData] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // State for the target-price inputs.
   const [targetValues, setTargetValues] = useState({});
+
+  // State for the new manual refresh button.
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
+
+  // Refresh all products tracked by the signed-in user.
+  const refreshPrices = async () => {
+    // Prevent repeated clicks while a refresh is running.
+    if (refreshing) return;
+
+    setRefreshing(true);
+    setRefreshResult(null);
+    onError?.("");
+    onNotify?.("");
+
+    try {
+      const response = await axios.post(
+        `${API}/api/products/watchlist/refresh`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          // Allow time for several retailer pages to be checked.
+          timeout: 180000,
+        }
+      );
+
+      const result = response.data;
+      setRefreshResult(result);
+
+      // Tell the user what the backend actually reported.
+      if (result.error) {
+        onError?.(result.error);
+      } else {
+        onNotify?.(
+          `Refresh finished: ${result.checked} products checked, ` +
+          `${result.skipped} skipped, ${result.alerts_sent} email alerts sent.`
+        );
+      }
+    } catch (error) {
+      // The backend returns 409 when another refresh is already running.
+      const statusCode = error.response?.status;
+      const detail = error.response?.data?.detail;
+
+      if (statusCode === 409) {
+        onError?.(
+          typeof detail === "string"
+            ? detail
+            : "A refresh is already running. Please try again shortly."
+        );
+      } else if (statusCode === 401) {
+        onError?.("Your login may have expired. Please log in again.");
+      } else {
+        onError?.(
+          typeof detail === "string"
+            ? detail
+            : "Could not refresh prices. Check your connection and backend logs."
+        );
+      }
+    } finally {
+      // Always re-enable the button after the request finishes.
+      setRefreshing(false);
+    }
+  };
+
+  // Load history for the selected tracked product.
   const openHistory = async (item) => {
     setHistoryFor(item.subscription_id);
     setHistoryData(null);
     setHistoryLoading(true);
+
     try {
-      const response = await axios.get(`${API}/api/products/watchlist/${item.subscription_id}/history`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(
+        `${API}/api/products/watchlist/${item.subscription_id}/history`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
       setHistoryData(response.data);
     } catch {
-      setHistoryData({ error: "Could not load price history yet." });
+      setHistoryData({
+        error: "Could not load price history yet.",
+      });
     } finally {
       setHistoryLoading(false);
     }
   };
 
-const saveTarget = async (item) => {
-  const raw = targetValues[item.subscription_id];
+  // Save or clear the target price for an individual subscription.
+  const saveTarget = async (item) => {
+    const raw = targetValues[item.subscription_id];
 
-  // An empty input clears the target price.
-  const targetPrice =
-    raw === undefined
-      ? item.target_price
-      : raw.trim() === ""
-        ? null
-        : Number(raw);
+    const targetPrice =
+      raw === undefined
+        ? item.target_price
+        : raw.trim() === ""
+          ? null
+          : Number(raw);
 
-  if (
-    targetPrice !== null &&
-    (!Number.isFinite(targetPrice) || targetPrice <= 0)
-  ) {
-    window.alert("Please enter a valid target price greater than ₹0.");
-    return;
-  }
+    // Reject invalid target prices before sending the request.
+    if (
+      targetPrice !== null &&
+      (!Number.isFinite(targetPrice) || targetPrice <= 0)
+    ) {
+      onError?.("Please enter a valid target price greater than ₹0.");
+      return;
+    }
 
-  try {
-    const response = await axios.patch(
-      `${API}/api/products/watchlist/${item.subscription_id}/target`,
-      { target_price: targetPrice },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    onError?.("");
+    onNotify?.("");
 
-    // Keep the input and displayed target in sync.
-    setTargetValues((old) => ({
-      ...old,
-      [item.subscription_id]:
-        targetPrice === null ? "" : String(targetPrice),
-    }));
+    try {
+      const response = await axios.patch(
+        `${API}/api/products/watchlist/${item.subscription_id}/target`,
+        { target_price: targetPrice },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-    window.alert(response.data.message || "Target price updated successfully.");
-  } catch (error) {
-    const message =
-      error.response?.data?.detail || "Could not save target price.";
+      // Keep the input synchronized with the saved value.
+      setTargetValues((old) => ({
+        ...old,
+        [item.subscription_id]:
+          targetPrice === null ? "" : String(targetPrice),
+      }));
 
-    window.alert(message);
-  }
-};
+      onNotify?.(
+        response.data?.message || "Target price updated successfully."
+      );
+    } catch (error) {
+      const message =
+        error.response?.data?.detail || "Could not save target price.";
+
+      onError?.(
+        typeof message === "string"
+          ? message
+          : "Could not save target price."
+      );
+    }
+  };
 
   return (
     <div className="page-stack">
       <section className="page-intro">
         <span className="eyebrow">YOUR PERSONAL COLLECTION</span>
+
         <h2>
           Things worth <span>watching.</span>
         </h2>
+
         <p>Your tracked products, in one place.</p>
       </section>
 
+      {/* Summary and manual refresh button. */}
       <div className="watchlist-summary">
         <div>
           <span className="eyebrow">SAVED PRODUCTS</span>
           <strong>{items.length.toString().padStart(2, "0")}</strong>
         </div>
+
         <span className="watchlist-heart">♡</span>
+
+        <button
+          className="btn-primary"
+          type="button"
+          onClick={refreshPrices}
+          disabled={refreshing || loading || items.length === 0}
+        >
+          {refreshing ? (
+            <>
+              <span className="loader" /> Refreshing...
+            </>
+          ) : (
+            <>↻ Refresh Prices</>
+          )}
+        </button>
       </div>
+
+      {/* Explain what the last refresh actually did. */}
+      {refreshResult && (
+        <div className="history-card" role="status">
+          <h4>Latest refresh results</h4>
+
+          <div className="history-stats">
+            <span>
+              Products checked
+              <strong>{refreshResult.checked ?? 0}</strong>
+            </span>
+
+            <span>
+              History points saved
+              <strong>{refreshResult.history_points ?? 0}</strong>
+            </span>
+
+            <span>
+              Products skipped
+              <strong>{refreshResult.skipped ?? 0}</strong>
+            </span>
+
+            <span>
+              Email alerts sent
+              <strong>{refreshResult.alerts_sent ?? 0}</strong>
+            </span>
+          </div>
+
+          {refreshResult.error && (
+            <p>{refreshResult.error}</p>
+          )}
+
+          {(refreshResult.skipped ?? 0) > 0 && (
+            <p>
+              Some retailer pages could not provide a reliable price.
+              Their prices were not fabricated or replaced with guesses.
+            </p>
+          )}
+
+          {refreshResult.checked > 0 &&
+            refreshResult.history_points === 0 && (
+              <p>
+                Prices were retrieved, but no new history points were due
+                under the current history-recording rules.
+              </p>
+            )}
+        </div>
+      )}
 
       {loading ? (
         <div className="empty-state">
@@ -1348,7 +1622,10 @@ const saveTarget = async (item) => {
         <div className="empty-state">
           <div className="empty-icon">♡</div>
           <h3>Your watchlist is waiting</h3>
-          <p>Search the saved catalog and track products you want to follow.</p>
+          <p>
+            Search the saved catalog and track products you want to follow.
+          </p>
+
           <button
             className="btn-primary"
             onClick={() => onNavigate("search")}
@@ -1377,7 +1654,9 @@ const saveTarget = async (item) => {
                 <span className="product-retailer">
                   {getRetailerName(item)}
                 </span>
+
                 <h3>{item.title}</h3>
+
                 <span className="verification-note">
                   Catalog price; verify before purchase.
                 </span>
@@ -1386,11 +1665,12 @@ const saveTarget = async (item) => {
               <div className="watchlist-price">
                 <small>CURRENT LISTED PRICE</small>
                 <strong>{productMoney(item.current_price)}</strong>
+
                 <small>
                   Target:{" "}
-                 {item.target_price == null
-                  ? "Not set"
-                   : productMoney(item.target_price)}
+                  {item.target_price == null
+                    ? "Not set"
+                    : productMoney(item.target_price)}
                 </small>
               </div>
 
@@ -1405,42 +1685,145 @@ const saveTarget = async (item) => {
                     View ↗
                   </a>
                 )}
-                <button className="btn-secondary" onClick={() => openHistory(item)} type="button">Price history</button>
-                <button className="btn-danger" onClick={() => onRemove(item.subscription_id)} type="button">Remove</button>
+
+                <button
+                  className="btn-secondary"
+                  onClick={() => openHistory(item)}
+                  type="button"
+                >
+                  Price history
+                </button>
+
+                <button
+                  className="btn-danger"
+                  onClick={() => onRemove(item.subscription_id)}
+                  type="button"
+                >
+                  Remove
+                </button>
               </div>
+
+              {/* Target-price alert settings. */}
               <div className="target-price-editor">
-                <label>Alert me at (₹)</label>
-                <input type="number" min="1" placeholder={item.target_price ?? "Target price"}
+                <label htmlFor={`target-${item.subscription_id}`}>
+                  Alert me at (₹)
+                </label>
+
+                <input
+                  id={`target-${item.subscription_id}`}
+                  type="number"
+                  min="1"
+                  placeholder={item.target_price ?? "Target price"}
                   value={targetValues[item.subscription_id] ?? ""}
-                  onChange={(event) => setTargetValues((old) => ({ ...old, [item.subscription_id]: event.target.value }))} />
-                <button className="btn-secondary" type="button" onClick={() => saveTarget(item)}>Save target</button>
+                  onChange={(event) =>
+                    setTargetValues((old) => ({
+                      ...old,
+                      [item.subscription_id]: event.target.value,
+                    }))
+                  }
+                />
+
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={() => saveTarget(item)}
+                >
+                  Save target
+                </button>
               </div>
+
+              {/* Price history, statistics and forecast. */}
               {historyFor === item.subscription_id && (
                 <div className="history-card">
-                  <div className="history-card-heading"><h4>Price history · {item.title}</h4><button type="button" className="btn-icon" onClick={() => setHistoryFor(null)}>×</button></div>
-                  {historyLoading ? <p>Loading history…</p> : historyData?.error ? <p>{historyData.error}</p> : historyData ? (
+                  <div className="history-card-heading">
+                    <h4>Price history · {item.title}</h4>
+
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={() => setHistoryFor(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {historyLoading ? (
+                    <p>Loading history…</p>
+                  ) : historyData?.error ? (
+                    <p>{historyData.error}</p>
+                  ) : historyData ? (
                     <>
-                      
-<div className="history-stats">
-  <span>
-    Average drop
-    <strong>{money(historyData.average_drop ?? 0)}</strong>
-  </span>
+                      <div className="history-stats">
+                        <span>
+                          Average drop
+                          <strong>
+                            {money(historyData.average_drop ?? 0)}
+                          </strong>
+                        </span>
 
-  <span>
-    Average rise
-    <strong>{money(historyData.average_rise ?? 0)}</strong>
-  </span>
+                        <span>
+                          Average rise
+                          <strong>
+                            {money(historyData.average_rise ?? 0)}
+                          </strong>
+                        </span>
 
-  <span>
-    Net change
-    <strong>{money(historyData.net_change ?? 0)}</strong>
-  </span>
-</div>
+                        <span>
+                          Net change
+                          <strong>
+                            {money(historyData.net_change ?? 0)}
+                          </strong>
+                        </span>
+                      </div>
 
+                      <PriceHistoryGraph
+                        history={historyData.history || []}
+                      />
 
+                      <div className="forecast-card">
+                        <h4>Expected price movement · 30 days</h4>
 
-                      <PriceHistoryGraph history={historyData.history || []} />
+                        {historyData.forecast?.status !== "available" ? (
+                          <p>
+                            Not enough historical data to make a useful
+                            forecast yet. Keep collecting prices over time.
+                          </p>
+                        ) : (
+                          <>
+                            <p>{historyData.forecast.message}</p>
+
+                            <div className="forecast-stats">
+                              <span>
+                                Estimated price
+                                <strong>
+                                  {money(
+                                    historyData.forecast.estimated_price
+                                  )}
+                                </strong>
+                              </span>
+
+                              <span>
+                                Possible trend range
+                                <strong>
+                                  {money(
+                                    historyData.forecast.estimated_low
+                                  )}
+                                  {" – "}
+                                  {money(
+                                    historyData.forecast.estimated_high
+                                  )}
+                                </strong>
+                              </span>
+                            </div>
+
+                            <p className="forecast-disclaimer">
+                              This is a basic trend estimate, not a
+                              guarantee or a statistically validated
+                              confidence interval.
+                            </p>
+                          </>
+                        )}
+                      </div>
                     </>
                   ) : null}
                 </div>
@@ -1455,76 +1838,66 @@ const saveTarget = async (item) => {
 
 
 
-
 function PriceHistoryGraph({ history = [] }) {
+  const now = new Date();
+  const rangeEnd = now;
+  const rangeStart = new Date(now);
+  rangeStart.setDate(rangeStart.getDate() - 89);
+
   const points = history
     .map((point) => ({
       price: Number(point.price),
-      date: point.recorded_at
-        ? new Date(point.recorded_at)
-        : null,
+      date: point.recorded_at ? new Date(point.recorded_at) : null,
     }))
     .filter(
       (point) =>
         Number.isFinite(point.price) &&
         point.price > 0 &&
         point.date &&
-        !Number.isNaN(point.date.getTime())
+        !Number.isNaN(point.date.getTime()) &&
+        point.date >= rangeStart &&
+        point.date <= rangeEnd
     )
     .sort((a, b) => a.date - b.date);
 
-  if (points.length === 0) {
-    return (
-      <div className="price-history-empty">
-        No recorded prices yet. The graph will appear when a valid
-        price observation is saved.
-      </div>
-    );
-  }
-
-  const width = 600;
-  const height = 230;
-
-  const padding = {
-    top: 28,
-    right: 24,
-    bottom: 48,
-    left: 24,
-  };
+  const width = 700;
+  const height = 280;
+  const padding = { top: 30, right: 24, bottom: 55, left: 75 };
 
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  const prices = points.map((point) => point.price);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const range = maxPrice - minPrice;
+  const prices = points.map((p) => p.price);
+  const actualMin = prices.length ? Math.min(...prices) : 0;
+  const actualMax = prices.length ? Math.max(...prices) : 1;
+  const priceRange = actualMax - actualMin;
 
   const displayMin =
-    range === 0
-      ? Math.max(0, minPrice * 0.95)
-      : Math.max(0, minPrice - range * 0.12);
+    prices.length === 0
+      ? 0
+      : Math.max(0, actualMin - (priceRange || actualMin * 0.1) * 0.12);
 
   const displayMax =
-    range === 0
-      ? maxPrice * 1.05
-      : maxPrice + range * 0.12;
+    prices.length === 0
+      ? 1
+      : actualMax + (priceRange || actualMax * 0.1) * 0.12;
 
   const displayRange = displayMax - displayMin || 1;
 
-  const coordinates = points.map((point, index) => {
-    const x =
-      points.length === 1
-        ? width / 2
-        : padding.left +
-          (index / (points.length - 1)) * chartWidth;
+  // Position each observation by its real date within the 90-day window.
+  const coordinates = points.map((point) => {
+    const elapsed =
+      point.date.getTime() - rangeStart.getTime();
+    const total =
+      rangeEnd.getTime() - rangeStart.getTime();
 
-    const y =
-      padding.top +
-      ((displayMax - point.price) / displayRange) *
-        chartHeight;
-
-    return { ...point, x, y };
+    return {
+      ...point,
+      x: padding.left + (elapsed / total) * chartWidth,
+      y:
+        padding.top +
+        ((displayMax - point.price) / displayRange) * chartHeight,
+    };
   });
 
   const linePoints = coordinates
@@ -1535,20 +1908,23 @@ function PriceHistoryGraph({ history = [] }) {
     date.toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
+    });
+
+  const formatAxisDate = (date) =>
+    date.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
       year: "2-digit",
     });
 
+  const moneyLabel = (value) =>
+    `₹${Math.round(value).toLocaleString("en-IN")}`;
+
   const first = points[0];
   const latest = points[points.length - 1];
-
-  const change = Number(
-    (latest.price - first.price).toFixed(2)
-  );
-
+  const change = first && latest ? latest.price - first.price : 0;
   const changePercent =
-    first.price > 0
-      ? Number(((change / first.price) * 100).toFixed(2))
-      : 0;
+    first && first.price > 0 ? (change / first.price) * 100 : 0;
 
   return (
     <div className="price-history-chart">
@@ -1557,8 +1933,8 @@ function PriceHistoryGraph({ history = [] }) {
           <span className="history-chart-label">
             LATEST RECORDED PRICE
           </span>
-          <strong>{money(latest.price)}</strong>
-          <small>{formatDate(latest.date)}</small>
+          <strong>{latest ? money(latest.price) : "—"}</strong>
+          <small>{latest ? formatAxisDate(latest.date) : "No data yet"}</small>
         </div>
 
         {points.length > 1 && (
@@ -1566,22 +1942,16 @@ function PriceHistoryGraph({ history = [] }) {
             <span className="history-chart-label">
               CHANGE SINCE FIRST RECORD
             </span>
-
             <strong
               className={
-                change < 0
-                  ? "price-down"
-                  : change > 0
-                    ? "price-up"
-                    : ""
+                change < 0 ? "price-down" : change > 0 ? "price-up" : ""
               }
             >
               {change > 0 ? "+" : ""}
-              {money(change)}
+              {moneyLabel(change)}
             </strong>
-
             <small>
-              {change > 0 ? "+" : ""}
+              {changePercent > 0 ? "+" : ""}
               {changePercent.toFixed(2)}%
             </small>
           </div>
@@ -1592,14 +1962,11 @@ function PriceHistoryGraph({ history = [] }) {
         <svg
           viewBox={`0 0 ${width} ${height}`}
           role="img"
-          aria-label={`Price history with ${points.length} recorded observations`}
+          aria-label={`90-day price history with ${points.length} recorded observations`}
         >
           {[0, 0.5, 1].map((fraction) => {
-            const y =
-              padding.top + fraction * chartHeight;
-
-            const price =
-              displayMax - fraction * displayRange;
+            const y = padding.top + fraction * chartHeight;
+            const price = displayMax - fraction * displayRange;
 
             return (
               <g key={fraction}>
@@ -1610,13 +1977,43 @@ function PriceHistoryGraph({ history = [] }) {
                   y2={y}
                   className="history-grid-line"
                 />
-
                 <text
-                  x={padding.left}
-                  y={y - 6}
+                  x={padding.left - 10}
+                  y={y + 4}
+                  textAnchor="end"
                   className="history-axis-label"
                 >
-                  {money(price)}
+                  {moneyLabel(price)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Fixed date axis: always shows the complete 90-day window. */}
+          {[0, 30, 60, 89].map((day) => {
+            const date = new Date(rangeStart);
+            date.setDate(date.getDate() + day);
+            const x = padding.left + (day / 89) * chartWidth;
+
+            return (
+              <g key={day}>
+                <line
+                  x1={x}
+                  y1={padding.top}
+                  x2={x}
+                  y2={padding.top + chartHeight}
+                  className="history-grid-line"
+                  opacity="0.45"
+                />
+                <text
+                  x={x}
+                  y={height - 20}
+                  textAnchor={
+                    day === 0 ? "start" : day === 89 ? "end" : "middle"
+                  }
+                  className="history-axis-label"
+                >
+                  {formatDate(date)}
                 </text>
               </g>
             );
@@ -1634,63 +2031,55 @@ function PriceHistoryGraph({ history = [] }) {
           )}
 
           {coordinates.map((point, index) => (
-            <g key={`${point.date.toISOString()}-${index}`}>
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="5"
-                className="history-point"
-              >
-                <title>
-                  {formatDate(point.date)} — {money(point.price)}
-                </title>
-              </circle>
-
-              {(index === 0 ||
-                index === coordinates.length - 1 ||
-                coordinates.length <= 5) && (
-                <text
-                  x={point.x}
-                  y={height - 16}
-                  textAnchor={
-                    index === 0
-                      ? "start"
-                      : index === coordinates.length - 1
-                        ? "end"
-                        : "middle"
-                  }
-                  className="history-axis-label"
-                >
-                  {formatDate(point.date)}
-                </text>
-              )}
-            </g>
+            <circle
+              key={`${point.date.toISOString()}-${index}`}
+              cx={point.x}
+              cy={point.y}
+              r="5"
+              className="history-point"
+            >
+              <title>
+                {formatAxisDate(point.date)} — {moneyLabel(point.price)}
+              </title>
+            </circle>
           ))}
         </svg>
       </div>
 
       <div className="chart-range">
-        <span>Lowest: {money(minPrice)}</span>
-        <span>Highest: {money(maxPrice)}</span>
-        <span>{points.length} recorded points</span>
+        <span>
+          Lowest: {points.length ? moneyLabel(actualMin) : "—"}
+        </span>
+        <span>
+          Highest: {points.length ? moneyLabel(actualMax) : "—"}
+        </span>
+        <span>{points.length} recorded observations · Last 90 days</span>
       </div>
 
-      {points.length === 1 && (
+      {points.length === 0 && (
         <p className="history-chart-note">
-          One price has been recorded so far. Price movement will
-          appear after another valid observation is saved.
+          No recorded prices in this 90-day period yet. Prices will appear
+          as the tracker collects genuine observations.
         </p>
       )}
 
-      {points.length > 1 && range === 0 && (
+      {points.length === 1 && (
         <p className="history-chart-note">
-          All recorded prices are currently the same. The line is
-          flat because no price change has been recorded yet.
+          Only one price observation is available. The full 90-day timeline
+          is shown; the graph will develop as more prices are recorded.
+        </p>
+      )}
+
+      {points.length > 1 && actualMin === actualMax && (
+        <p className="history-chart-note">
+          All recorded prices are currently the same. The line is flat
+          because no price change has been recorded.
         </p>
       )}
     </div>
   );
 }
+
 
 
 
@@ -1723,7 +2112,7 @@ function ProfilePage({
             <div className="account-graphic-ring" />
             <span>✳</span>
           </div>
-          <span className="eyebrow">PRICE TRACKER MEMBER SPACE</span>
+          <span className="eyebrow">PRICEPULSE MEMBER SPACE</span>
           <h2>
             Good decisions start with <span>good information.</span>
           </h2>
@@ -1851,6 +2240,221 @@ function ProfilePage({
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+
+function BudgetBasket({ watchlist }) {
+  const [budget, setBudget] = useState(
+    () => localStorage.getItem("budget_basket_amount") || "20000"
+  );
+
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  useEffect(() => {
+    localStorage.setItem("budget_basket_amount", budget);
+  }, [budget]);
+
+  const toggleProduct = (id) => {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((selectedId) => selectedId !== id)
+        : [...current, id]
+    );
+  };
+
+  const selectedProducts = watchlist.filter((item) =>
+    selectedIds.includes(item.subscription_id)
+  );
+
+  const pricedProducts = selectedProducts.filter((item) => {
+    const price = Number(item.current_price);
+    return (
+      item.current_price !== null &&
+      item.current_price !== undefined &&
+      item.current_price !== "" &&
+      Number.isFinite(price) &&
+      price > 0
+    );
+  });
+
+  const unavailableCount = selectedProducts.length - pricedProducts.length;
+
+  const total = pricedProducts.reduce(
+    (sum, item) => sum + Number(item.current_price),
+    0
+  );
+
+  const budgetAmount = Number(budget);
+  const validBudget =
+    budget.trim() !== "" &&
+    Number.isFinite(budgetAmount) &&
+    budgetAmount >= 0;
+
+  const difference = validBudget ? budgetAmount - total : 0;
+
+  return (
+    <div className="page-stack">
+      <section className="page-intro">
+        <span className="eyebrow">PLAN YOUR PURCHASES</span>
+        <h2>
+          Your budget. <span>Your basket.</span>
+        </h2>
+        <p>
+          Select tracked products to estimate your spending before you buy.
+        </p>
+      </section>
+
+      <section className="stat-card budget-card">
+        <label htmlFor="basket-budget" className="stat-label">
+          YOUR TOTAL BUDGET (₹)
+        </label>
+
+        <input
+          id="basket-budget"
+          className="budget-input"
+          type="number"
+          min="0"
+          step="0.01"
+          value={budget}
+          onChange={(event) => setBudget(event.target.value)}
+          placeholder="Enter your budget"
+        />
+
+        <p className="stat-detail">
+          Your budget is saved in this browser.
+        </p>
+      </section>
+
+      <section className="section-block">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">YOUR TRACKED PRODUCTS</span>
+            <h2>Select items for your basket</h2>
+            <p>
+              Select or deselect products to update the calculation.
+            </p>
+          </div>
+        </div>
+
+        {!watchlist.length ? (
+          <div className="empty-state">
+            <div className="empty-icon">▣</div>
+            <h3>No tracked products yet</h3>
+            <p>
+              Track some products first, then return here to plan your budget.
+            </p>
+          </div>
+        ) : (
+          <div className="basket-list">
+            {watchlist.map((item) => {
+              const rawPrice = item.current_price;
+              const price = Number(rawPrice);
+
+              const hasPrice =
+                rawPrice !== null &&
+                rawPrice !== undefined &&
+                rawPrice !== "" &&
+                Number.isFinite(price) &&
+                price > 0;
+
+              return (
+                <label
+                  className={`basket-item ${
+                    selectedIds.includes(item.subscription_id) ? "selected" : ""
+                  }`}
+                  key={item.subscription_id}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.title || "product"}`}
+                    checked={selectedIds.includes(item.subscription_id)}
+                    onChange={() => toggleProduct(item.subscription_id)}
+                  />
+
+                  <img
+                    src={getProductImage(item)}
+                    alt={item.title || "Product"}
+                    onError={(event) => {
+                      event.currentTarget.onerror = null;
+                      event.currentTarget.src = PLACEHOLDER_IMAGE;
+                    }}
+                  />
+
+                  <div className="basket-product">
+                    <span className="product-retailer">
+                      {getRetailerName(item)}
+                    </span>
+                    <h3>{item.title || "Untitled product"}</h3>
+                  </div>
+
+                  <div className="basket-price">
+                    <small>LISTED PRICE</small>
+                    <strong>
+                      {hasPrice ? productMoney(price) : "Price unavailable"}
+                    </strong>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="stats-grid stats-grid-3">
+        <div className="stat-card">
+          <span className="stat-label">SELECTED ITEMS</span>
+          <strong className="stat-value">{selectedProducts.length}</strong>
+          <span className="stat-detail">Products in your basket</span>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-label">ESTIMATED TOTAL</span>
+          <strong className="stat-value">
+            {productMoney(total)}
+          </strong>
+          <span className="stat-detail">
+            Based on available listed prices
+          </span>
+        </div>
+
+        <div className="stat-card">
+          <span className="stat-label">
+            {difference < 0 ? "OVER BUDGET" : "BUDGET REMAINING"}
+          </span>
+          <strong className="stat-value">
+            {validBudget
+              ? productMoney(Math.abs(difference))
+              : "Enter a valid budget"}
+          </strong>
+          <span className="stat-detail">
+            {validBudget
+              ? difference < 0
+                ? "Reduce your basket or increase your budget."
+                : "Amount left after selected listed prices."
+              : "Budget must be zero or greater."}
+          </span>
+        </div>
+      </section>
+
+      {unavailableCount > 0 && (
+        <div className="notice notice-error">
+          <span>!</span>
+          <p>
+            {unavailableCount} selected product
+            {unavailableCount === 1 ? " has" : "s have"} no usable price.
+            The total excludes {unavailableCount} item
+            {unavailableCount === 1 ? "" : "s"} and may be incomplete.
+          </p>
+        </div>
+      )}
+
+      <p className="disclaimer">
+        This is an estimate based on prices stored in your tracked list.
+        Prices, delivery charges, discounts, and availability may change.
+        Confirm the final price with the retailer before purchasing.
+      </p>
     </div>
   );
 }

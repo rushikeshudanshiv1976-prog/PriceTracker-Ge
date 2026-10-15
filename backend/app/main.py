@@ -1,8 +1,6 @@
-
 import logging
 import os
 from contextlib import asynccontextmanager
-from importlib import import_module
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -14,62 +12,134 @@ from app.database import Base, engine
 from app import models  # Register ORM models before create_all.
 from app.routes import auth, products
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
+def price_scheduler_enabled() -> bool:
+    return os.getenv(
+        "ENABLE_PRICE_SCHEDULER", "true"
+    ).strip().lower() in {"1", "true", "yes"}
+
+
+def refresh_on_startup() -> bool:
+    # Off by default: with uvicorn --reload every code save restarts the
+    # server, and a startup refresh spends one SerpApi search per product.
+    return os.getenv(
+        "REFRESH_ON_STARTUP", "false"
+    ).strip().lower() in {"1", "true", "yes"}
+
+
+def price_refresh_hours() -> int:
+    try:
+        hours = int(os.getenv("PRICE_REFRESH_HOURS", "12"))
+        if hours < 1:
+            raise ValueError("PRICE_REFRESH_HOURS must be at least 1.")
+        return hours
+    except ValueError:
+        logger.warning(
+            "Invalid PRICE_REFRESH_HOURS; using the default of 12 hours."
+        )
+        return 12
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Keep the API process alive when PostgreSQL is temporarily unavailable.
-    # Requests that need the DB will return errors, and logs retain the cause.
+    # Initialize database tables.
     try:
         Base.metadata.create_all(bind=engine)
+        logger.info("Database initialization completed.")
     except Exception:
-        logging.getLogger(__name__).exception(
-            "Database initialization failed; "
-            "check DATABASE_URL and PostgreSQL availability"
+        logger.exception(
+            "Database initialization failed. "
+            "Check DATABASE_URL and PostgreSQL availability."
         )
 
     scheduler = None
 
-    try:
+    if price_scheduler_enabled():
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
-        except ImportError:
-            BackgroundScheduler = None
+            from app.services.background_jobs import refresh_tracked_prices
 
-        from app.services.background_jobs import refresh_tracked_prices
-
-        if BackgroundScheduler is not None:
             scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+
+            # Optionally run the first refresh right after startup. Disable it
+            # (REFRESH_ON_STARTUP=false) while developing with --reload so
+            # every code save does not spend SerpApi quota.
+            if refresh_on_startup():
+                scheduler.add_job(
+                    refresh_tracked_prices,
+                    "date",
+                    id="refresh_tracked_prices_startup",
+                    replace_existing=True,
+                )
+
+            # Schedule recurring price refreshes.
+            refresh_hours = price_refresh_hours()
 
             scheduler.add_job(
                 refresh_tracked_prices,
                 "interval",
-                hours=int(os.getenv("PRICE_REFRESH_HOURS", "12")),
+                hours=refresh_hours,
                 id="refresh_tracked_prices",
                 max_instances=1,
                 coalesce=True,
+                replace_existing=True,
             )
 
-            if os.getenv(
-                "ENABLE_PRICE_SCHEDULER", "true"
-            ).lower() in {"1", "true", "yes"}:
-                scheduler.start()
-        else:
-            logging.getLogger(__name__).warning(
-                "APScheduler is not installed; "
-                "price refresh scheduler disabled"
+            scheduler.start()
+
+            # Get the actual next run time of the recurring job.
+            recurring_job = scheduler.get_job("refresh_tracked_prices")
+
+            if recurring_job and recurring_job.next_run_time:
+                next_run_time = recurring_job.next_run_time.strftime(
+                    "%d %b %Y, %I:%M:%S %p %Z"
+                )
+            else:
+                next_run_time = "Not available"
+
+            logger.info(
+                "Price scheduler started. "
+                "startup refresh: %s; "
+                "recurring refresh interval: every %s hour(s). "
+                "Next recurring refresh: %s",
+                refresh_on_startup(),
+                refresh_hours,
+                next_run_time,
             )
 
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "Price scheduler could not start"
+        except ImportError:
+            logger.exception(
+                "APScheduler is not installed. Automatic price refresh "
+                "is disabled. Install it in the backend virtual environment."
+            )
+            scheduler = None
+
+        except Exception:
+            logger.exception("Price scheduler could not start.")
+            if scheduler is not None and scheduler.running:
+                scheduler.shutdown(wait=False)
+            scheduler = None
+
+    else:
+        logger.info(
+            "Automatic price scheduler disabled by ENABLE_PRICE_SCHEDULER."
         )
+
+    app.state.price_scheduler = scheduler
 
     yield
 
-    if scheduler and scheduler.running:
+    # Shut down the scheduler cleanly when FastAPI stops.
+    if scheduler is not None and scheduler.running:
         scheduler.shutdown(wait=False)
+        logger.info("Price scheduler stopped.")
 
 
 app = FastAPI(
@@ -116,4 +186,5 @@ def read_root():
         "message": "Price Tracker API is running",
         "version": app.version,
         "docs": "/docs",
+        "price_scheduler_enabled": price_scheduler_enabled(),
     }

@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -12,13 +13,28 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 
+logger = logging.getLogger(__name__)
+
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+
+try:
+    JWT_EXPIRE_MINUTES = max(1, int(os.getenv("JWT_EXPIRE_MINUTES", "60")))
+except ValueError:
+    JWT_EXPIRE_MINUTES = 60
 
 if not JWT_SECRET_KEY:
-    # Safe for local development only; set a stable secret in backend/.env.
+    # Local development only. A random per-process secret logs everyone out on
+    # every restart and breaks multi-worker deployments, so set a stable one.
     JWT_SECRET_KEY = secrets.token_urlsafe(48)
+    logger.warning(
+        "JWT_SECRET_KEY is not set; using a temporary secret. "
+        "Sessions will be invalidated on restart."
+    )
+
+# Used to burn comparable CPU time when the account does not exist, so login
+# timing does not reveal which emails are registered.
+_DUMMY_HASH = None
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -34,7 +50,11 @@ def verify_password(password: str, stored_hash: str) -> bool:
     """Verify modern hashes and allow one-time upgrade of legacy plain-text hashes."""
     if not stored_hash.startswith("pbkdf2_sha256$"):
         # Legacy support only so existing accounts can sign in once and be upgraded.
-        return hmac.compare_digest(password, stored_hash)
+        # compare_digest on str raises TypeError for non-ASCII input, so
+        # compare bytes.
+        return hmac.compare_digest(
+            password.encode("utf-8"), stored_hash.encode("utf-8")
+        )
     try:
         scheme, iterations, salt_hex, digest_hex = stored_hash.split("$", 3)
         if scheme != "pbkdf2_sha256":
@@ -45,6 +65,14 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return hmac.compare_digest(actual, digest_hex)
     except (ValueError, TypeError):
         return False
+
+
+def burn_password_check(password: str) -> None:
+    """Spend the same time as a real verification (unknown-user login path)."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+    verify_password(password, _DUMMY_HASH)
 
 
 def create_access_token(user: User) -> str:
