@@ -2847,12 +2847,14 @@ button:disabled {
 
 
 /* Discount detector evidence */
+/* Discount detector evidence — theme-aware colors */
 .discount-evidence {
   margin-top: 16px;
   padding: 16px;
-  border: 1px solid var(--border-color, #343448);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--card-bg, #171725);
+  background: var(--panel);
+  color: var(--text);
 }
 
 .discount-evidence-heading {
@@ -2861,21 +2863,24 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  color: var(--text);
 }
 
 .discount-evidence-label {
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  opacity: 0.75;
 }
 
 .discount-evidence-heading strong {
+  color: var(--text);
   font-size: 0.85rem;
 }
 
 .discount-evidence p {
   margin: 12px 0;
+  color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.55;
 }
@@ -2908,11 +2913,12 @@ button:disabled {
 }
 
 .discount-evidence-stats small {
+  color: var(--muted);
   font-size: 0.68rem;
-  opacity: 0.7;
 }
 
 .discount-evidence-stats strong {
+  color: var(--text);
   font-size: 0.88rem;
   overflow-wrap: anywhere;
 }
@@ -2920,7 +2926,7 @@ button:disabled {
 .discount-evidence-source {
   display: block;
   margin-top: 14px;
+  color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.5;
-  opacity: 0.75;
 }
