@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import axios from "axios";
 
@@ -7,6 +6,7 @@ const API =
 
 export default function ManualTrackForm({ token, onSuccess }) {
   const [url, setUrl] = useState("");
+  const [productName, setProductName] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -50,10 +50,15 @@ export default function ManualTrackForm({ token, onSuccess }) {
     const headers = { Authorization: `Bearer ${token}` };
 
     try {
-      // 1. Retrieve product information from the retailer.
+      // 1. Retrieve product information from the retailer. If the store
+      //    blocks the page, the name typed below is used instead.
+      const body = { url: productUrl.href };
+      const name = productName.trim();
+      if (name) body.title = name;
+
       const ingestResponse = await axios.post(
         `${API}/api/products/ingest`,
-        { url: productUrl.href },
+        body,
         { timeout: 60000 }
       );
 
@@ -110,13 +115,21 @@ export default function ManualTrackForm({ token, onSuccess }) {
 
       const verifiedPrice = ingestResponse.data?.price;
 
-      setMessage(
-        verifiedPrice == null
-          ? "Product added to your watchlist. Its current price could not be verified yet."
-          : `Product added successfully! Retrieved price: ₹${Number(verifiedPrice).toLocaleString("en-IN")}`
-      );
+      if (ingestResponse.data?.used_manual_title) {
+        setMessage(
+          "Added using the name you entered. The store blocked the page, " +
+          "so the price will appear after the next price refresh."
+        );
+      } else {
+        setMessage(
+          verifiedPrice == null
+            ? "Product added to your watchlist. Its current price could not be verified yet."
+            : `Product added successfully! Retrieved price: ₹${Number(verifiedPrice).toLocaleString("en-IN")}`
+        );
+      }
 
       setUrl("");
+      setProductName("");
       setTargetPrice("");
 
       if (typeof onSuccess === "function") {
@@ -156,6 +169,20 @@ export default function ManualTrackForm({ token, onSuccess }) {
             placeholder="https://www.amazon.in/dp/..."
             autoComplete="url"
             required
+          />
+        </div>
+
+        <div className="manual-track-field manual-name-field">
+          <label htmlFor="manual-product-name">
+            Product name <span>— used if the store blocks the page</span>
+          </label>
+          <input
+            id="manual-product-name"
+            type="text"
+            value={productName}
+            onChange={(event) => setProductName(event.target.value)}
+            placeholder="e.g. Samsung Galaxy S25 FE 5G 128GB"
+            maxLength={300}
           />
         </div>
 

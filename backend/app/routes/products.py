@@ -36,6 +36,9 @@ router = APIRouter(prefix="/api/products", tags=["Products"])
 
 class IngestProductRequest(BaseModel):
     url: HttpUrl
+    # Optional name, used ONLY when the store blocks the page fetch (Amazon,
+    # Flipkart etc. often do). Prices then come from Google Shopping search.
+    title: str | None = Field(default=None, max_length=300)
 
 
 class ExternalTrackRequest(BaseModel):
@@ -729,15 +732,28 @@ def ingest_product(
         )
 
     title = scraped.get("title")
+    used_manual_title = False
 
     if not title or title == "Unknown product":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                scraped.get("message")
-                or "Could not identify the product on this page."
-            ),
-        )
+        manual_title = " ".join((payload.title or "").split())
+
+        # Fallback only when a public page was reached but the store blocked
+        # us or gave no usable title ("blocked"/"partial"). Unsafe or
+        # unreachable URLs ("error", handled above) never get this fallback.
+        if len(manual_title) >= 2 and scraped.get("status") in {
+            "blocked",
+            "partial",
+        }:
+            title = manual_title
+            used_manual_title = True
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    scraped.get("message")
+                    or "Could not identify the product on this page."
+                ),
+            )
 
     retailer = get_retailer(final_url)
     raw_price = scraped.get("current_price")
@@ -772,7 +788,10 @@ def ingest_product(
             db.add(product)
             db.flush()
         else:
-            product.title = title
+            # Keep an existing product's title when the name came from the
+            # user because the store blocked the page.
+            if not used_manual_title:
+                product.title = title
             product.image_url = (
                 scraped.get("image_url") or product.image_url
             )
@@ -844,6 +863,7 @@ def ingest_product(
 
     return {
         "message": "Product metadata processed",
+        "used_manual_title": used_manual_title,
         "product_id": product.id,
         "offer_id": offer.id,
         "title": product.title,
