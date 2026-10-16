@@ -36,15 +36,15 @@ def refresh_on_startup() -> bool:
 
 def price_refresh_hours() -> int:
     try:
-        hours = int(os.getenv("PRICE_REFRESH_HOURS", "12"))
+        hours = int(os.getenv("PRICE_REFRESH_HOURS", "24"))
         if hours < 1:
             raise ValueError("PRICE_REFRESH_HOURS must be at least 1.")
         return hours
     except ValueError:
         logger.warning(
-            "Invalid PRICE_REFRESH_HOURS; using the default of 12 hours."
+            "Invalid PRICE_REFRESH_HOURS; using the default of 24 hours."
         )
-        return 12
+        return 24
 
 
 @asynccontextmanager
@@ -148,12 +148,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
 allowed_origins = [
-    origin.strip().rstrip("/")
+    origin.strip()
     for origin in os.getenv(
         "FRONTEND_ORIGINS",
-        "https://price-tracker-rho-opal.vercel.app,"
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"
         "http://localhost:3000",
@@ -164,11 +162,6 @@ allowed_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-)
-
     allow_credentials=True,
     allow_methods=[
         "GET",
