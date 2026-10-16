@@ -237,6 +237,38 @@ def _title_from_url(url: str) -> str | None:
     )
 
 
+def title_from_url(url: str) -> str | None:
+    """
+    Readable product name taken from the URL path (Amazon /name/dp/ASIN,
+    Flipkart /name/p/itm...). Used only when the store blocks the page.
+    Returns None when the URL carries no real name.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+
+    host = (parsed.hostname or "").lower().rstrip(".")
+    slug = None
+
+    if "flipkart." in host:
+        match = re.match(r"^/([^/]+)/p/", parsed.path or "")
+        if match:
+            slug = match.group(1)
+    elif "amazon." in host:
+        match = re.search(r"/([^/]+)/(?:dp|gp/product)/[A-Z0-9]{10}",
+                          parsed.path or "", re.IGNORECASE)
+        if match:
+            slug = match.group(1)
+
+    if not slug:
+        return None
+
+    slug = re.sub(r"[-_]+", " ", unquote(slug))
+    slug = re.sub(r"\s+", " ", slug).strip()
+    return slug[:250] if len(slug) >= 3 else None
+
+
 def _extract_price(value):
     """Parse positive prices from numbers or strings."""
     if value is None or isinstance(value, bool):
@@ -588,9 +620,16 @@ def scrape_product_page(url: str):
     try:
         response.raise_for_status()
     except requests.RequestException:
+        # 404/410 mean the product page is really gone; any other error
+        # (403, 429, 5xx, Flipkart's 529) is how stores turn bots away.
         return _failure(
             f"The retailer returned HTTP {response.status_code}.",
             final_validated_url,
+            status=(
+                "error"
+                if response.status_code in {404, 410}
+                else "blocked"
+            ),
         )
 
     content_type = response.headers.get("Content-Type", "").lower()

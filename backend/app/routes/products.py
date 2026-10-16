@@ -26,6 +26,7 @@ from app.services.product_search import (
     ProductSearchError,
     search_external_products,
 )
+from app.services.scraper import title_from_url
 from app.services.price_fallback import lookup_provider_price
 from app.services.cleanup import delete_product_completely, has_subscribers
 from app.services.product_comparison import compare_product_offers
@@ -172,13 +173,7 @@ def refresh_product_data(db: Session, product: Product) -> dict[str, Any]:
                 current_price=price,
                 currency="INR",
                 price_status=(
-                    (
-                        "verified"
-                        if price_source == "retailer_page"
-                        else "provider_reported"
-                    )
-                    if price is not None
-                    else "unavailable"
+                    "verified" if price is not None else "unavailable"
                 ),
                 last_checked=now,
             )
@@ -190,11 +185,7 @@ def refresh_product_data(db: Session, product: Product) -> dict[str, Any]:
 
             if price is not None:
                 offer.current_price = price
-                offer.price_status = (
-                    "verified"
-                    if price_source == "retailer_page"
-                    else "provider_reported"
-                )
+                offer.price_status = "verified"
             elif offer.current_price is not None:
                 offer.price_status = "stale"
             else:
@@ -748,6 +739,14 @@ def ingest_product(
     if not title or title == "Unknown product":
         manual_title = " ".join((payload.title or "").split())
 
+        # No typed name: use the name in the URL itself (shown by Amazon and
+        # Flipkart links) when the store blocks the page.
+        if len(manual_title) < 2 and scraped.get("status") in {
+            "blocked",
+            "partial",
+        }:
+            manual_title = title_from_url(final_url) or ""
+
         # Fallback only when a public page was reached but the store blocked
         # us or gave no usable title ("blocked"/"partial"). Unsafe or
         # unreachable URLs ("error", handled above) never get this fallback.
@@ -835,7 +834,13 @@ def ingest_product(
                 current_price=price,
                 currency="INR",
                 price_status=(
-                    "verified" if price is not None else "unavailable"
+                    (
+                        "verified"
+                        if price_source == "retailer_page"
+                        else "provider_reported"
+                    )
+                    if price is not None
+                    else "unavailable"
                 ),
                 last_checked=now,
             )
@@ -848,7 +853,11 @@ def ingest_product(
 
             if price is not None:
                 offer.current_price = price
-                offer.price_status = "verified"
+                offer.price_status = (
+                    "verified"
+                    if price_source == "retailer_page"
+                    else "provider_reported"
+                )
             elif offer.current_price is not None:
                 offer.price_status = "stale"
             else:
