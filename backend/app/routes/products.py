@@ -695,7 +695,6 @@ def compare_product_prices(
 )
 def ingest_product(
     payload: IngestProductRequest,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Ingest a direct retailer URL and save available observations."""

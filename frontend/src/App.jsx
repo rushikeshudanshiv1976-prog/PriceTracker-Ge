@@ -582,7 +582,7 @@ export default function App() {
   <img
     className="brand-icon"
     src="/pricepulse-icon.png"
-    alt=""
+    alt="PricePulse logo"
   />
   <span className="brand-copy">
     <span className="brand-name">
