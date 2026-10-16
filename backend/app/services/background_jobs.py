@@ -34,6 +34,7 @@ from app.models import (
     Subscription,
 )
 from app.services.email_alerts import send_price_alert
+from app.services.price_fallback import lookup_provider_price
 from app.services.product_search import (
     ProductSearchError,
     search_external_products,
@@ -370,6 +371,22 @@ def refresh_tracked_prices(user_email=None, product_id=None):
             try:
                 # Search using the tracked title, not its Google Shopping URL.
                 result = _get_lowest_google_price(product)
+
+                # Products added by URL with no price yet (long retailer
+                # titles often fail the strict match): try the short-name
+                # lookup. Only used while the product has no price at all.
+                if result is None and not _valid_price(
+                    product.current_price
+                ):
+                    fb = lookup_provider_price(product.title)
+                    if fb:
+                        result = {
+                            "title": fb["title"],
+                            "price": fb["price"],
+                            "url": fb["url"],
+                            "retailer": fb["retailer"],
+                            "price_status": "provider_reported",
+                        }
 
                 if result is None:
                     skipped += 1

@@ -26,6 +26,7 @@ from app.services.product_search import (
     ProductSearchError,
     search_external_products,
 )
+from app.services.price_fallback import lookup_provider_price
 from app.services.cleanup import delete_product_completely, has_subscribers
 from app.services.product_comparison import compare_product_offers
 from app.services.discount_detector import annotate_discount_evidence
@@ -171,7 +172,13 @@ def refresh_product_data(db: Session, product: Product) -> dict[str, Any]:
                 current_price=price,
                 currency="INR",
                 price_status=(
-                    "verified" if price is not None else "unavailable"
+                    (
+                        "verified"
+                        if price_source == "retailer_page"
+                        else "provider_reported"
+                    )
+                    if price is not None
+                    else "unavailable"
                 ),
                 last_checked=now,
             )
@@ -183,7 +190,11 @@ def refresh_product_data(db: Session, product: Product) -> dict[str, Any]:
 
             if price is not None:
                 offer.current_price = price
-                offer.price_status = "verified"
+                offer.price_status = (
+                    "verified"
+                    if price_source == "retailer_page"
+                    else "provider_reported"
+                )
             elif offer.current_price is not None:
                 offer.price_status = "stale"
             else:
@@ -768,6 +779,16 @@ def ingest_product(
     ):
         price = None
 
+    price_source = "retailer_page" if price is not None else None
+
+    if price is None:
+        # The page gave a name but no price (or the store blocked us): use
+        # an honest Google Shopping price, labelled provider-reported.
+        fallback = lookup_provider_price(title)
+        if fallback:
+            price = fallback["price"]
+            price_source = "google_shopping"
+
     now = datetime.utcnow()
 
     try:
@@ -869,6 +890,7 @@ def ingest_product(
         "title": product.title,
         "retailer": retailer,
         "price": price,
+        "price_source": price_source,
         "stored_price": offer.current_price,
         "price_status": offer.price_status,
         "url": final_url,

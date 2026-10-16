@@ -1,4 +1,3 @@
-
 import ipaddress
 import json
 import re
@@ -388,6 +387,57 @@ def _extract_meta_price(soup):
     return None
 
 
+def _extract_html_price(soup, hostname):
+    """
+    Read the displayed selling price from the product page HTML.
+
+    Amazon and Flipkart rarely put the price in JSON-LD or meta tags, so the
+    price is read from the visible price element instead. Struck-through
+    list prices (M.R.P.) are skipped on purpose.
+    """
+    host = (hostname or "").lower()
+
+    if "amazon." in host:
+        selectors = (
+            "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen",
+            "#corePrice_feature_div .priceToPay .a-offscreen",
+            "#corePrice_feature_div .a-price:not(.a-text-price) .a-offscreen",
+            "#apex_desktop .priceToPay .a-offscreen",
+            "#apex_desktop .a-price:not(.a-text-price) .a-offscreen",
+            "span.priceToPay .a-offscreen",
+            "#priceblock_dealprice",
+            "#priceblock_ourprice",
+            "#price_inside_buybox",
+            "#tp_price_block_total_price_ww .a-offscreen",
+            ".a-price:not(.a-text-price) .a-offscreen",
+        )
+    elif "flipkart." in host:
+        selectors = (
+            "div.Nx9bqj.CxhGGd",
+            "div.Nx9bqj",
+            "div._30jeq3._16Jk6d",
+            "div._30jeq3",
+            "div.hZ3P6w",
+        )
+    else:
+        return None
+
+    for selector in selectors:
+        try:
+            nodes = soup.select(selector)
+        except Exception:
+            continue
+
+        for node in nodes[:3]:
+            price = _extract_price(
+                node.get("content") or node.get_text(" ", strip=True)
+            )
+            if price is not None:
+                return price
+
+    return None
+
+
 def _looks_like_block_page(html, response_url="", status_code=None):
     """
     Detect common retailer access-denial pages.
@@ -570,6 +620,13 @@ def scrape_product_page(url: str):
             if title:
                 break
 
+    if not title:
+        node = soup.select_one("#productTitle")
+        if node:
+            title = _valid_product_title(
+                node.get_text(" ", strip=True), hostname
+            )
+
     if not title and soup.title:
         title = _valid_product_title(
             soup.title.get_text(" ", strip=True), hostname
@@ -583,6 +640,16 @@ def scrape_product_page(url: str):
 
     if price is None:
         price = _extract_meta_price(soup)
+
+    if price is None:
+        price = _extract_html_price(soup, hostname)
+
+    if not image_url:
+        node = soup.select_one("#landingImage, #imgTagWrapperId img")
+        if node:
+            image_url = _clean_text(
+                node.get("data-old-hires") or node.get("src")
+            )
 
     if not currency:
         currency = (
